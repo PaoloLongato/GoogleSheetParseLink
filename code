@@ -1,0 +1,215 @@
+// *****************
+// * CONFIGURATION *
+// *****************
+
+var sleepTime = 1000;
+var headers = 
+      {
+        "X-Parse-Application-Id" : "YourId",
+        "X-Parse-REST-API-Key" : "YourRESTAPIKey",
+        "Content-Type" : "application/json"
+      };
+
+
+// **********************
+// * CALABLE FROM SHEET *
+// **********************
+
+// Get JSON value for key
+function getJSONValueForKey(string, key) {
+   if (typeof string != 'string') {
+    return "string must be a string";
+  } else if (typeof key != 'string') {
+    return "key must be a string";
+  } else {
+    return returnValues = JSON.parse(string)[key];
+  }
+}
+
+
+function process() {
+  var sheet = SpreadsheetApp.getActiveSheet();
+  var rangedata = sheet.getRange("A2:H1000");
+  var data = rangedata.getValues();
+  var updateColumn = sheet.getRange("B2:B1000").getValues();
+  for (var i = 0; i < updateColumn.length; i++) {
+    if (updateColumn[i][0] == "update") {
+      var payloadstring = data[i][3];
+      var class = data[i][2];
+      if (data[i][4] == "") {
+        var responseObject = addObject(class, payloadstring);
+        sheet.getRange(i+2,5).setValue(responseObject["objectId"]);
+        sheet.getRange(i+2,6).setValue(responseObject["createdAt"]);
+        sheet.getRange(i+2,2).setValue("");
+        sheet.getRange(i+2,8).setValue(JSON.stringify(responseObject));
+      } else {
+        var responseObject = updateObject(class, data[i][4], payloadstring);
+        sheet.getRange(i+2,7).setValue(responseObject["updatedAt"]);
+        sheet.getRange(i+2,2).setValue("");
+        sheet.getRange(i+2,8).setValue(JSON.stringify(responseObject));
+      }
+    } else if (updateColumn[i][0] == "delete") {
+      // DELETE CODE TO BE ADDED IN THE FUTURE
+    }
+  }
+}
+
+// Make payload.  All input data types must be converted to Parse types.  Keys will be converted to JS strings
+function makePayload(headers, data) {
+  var h
+  var d
+  if (headers.length == 1) {
+    h = headers[0];
+    d = data[0];
+  } else {
+    h = headers;
+    d = data;
+  }
+  var payload = {};
+  for (var i = 0; i < h.length; i++) {
+    payload[String(h[i])] = JSON.parse(d[i]);
+  }
+  return JSON.stringify(payload).replace(/\s+/g, '');
+}
+
+// Convert to Parse String
+function makeParseString(str) {
+  return "\""+str+"\"";
+}  
+  
+// Construct Parse Array
+function makeParseArray(data){
+  var returnValue = [];
+  for (var i = 0; i < data.length; i++) {
+    returnValue.push(data[i]);
+  }
+  returnValue = "[" + returnValue.join(",") + "]";
+  returnValue = returnValue.replace(/\s+/g, '');
+  return returnValue
+}
+
+// Construct Parse Pointer
+function makeParsePointer(objectId, class) {
+  var returnValue = 
+      {
+         "__type": "Pointer",
+        "className": String(class),
+         "objectId": String(objectId)
+      }
+  return JSON.stringify(returnValue).replace(/\s+/g, '');
+}
+
+// Construct Parse File from its Parse name
+function makeParseFileFromName(name) {
+  var returnValue = 
+      {
+         "__type": "File",
+        "name": String(name)
+      }
+  return JSON.stringify(returnValue).replace(/\s+/g, '');
+}
+
+// Construct Parse File from its Parse link
+function makeParseFileFromLink(link) {
+  var pos = link.lastIndexOf("/") + 1;
+  var name = link.substring(pos);
+  return makeParseFileFromName(name);
+}
+
+
+// **********************
+// * INTERNAL FUNCTIONS *
+// **********************
+
+// Get a a file Link from Parse
+function getParseFileLink(objectId,class,column) {
+  if (typeof objectId != 'string') {
+    return "objectId must be a string";
+  } else if (typeof class != 'string') {
+    return "class must be a string";
+  } else if (typeof column != 'string') {
+    return "column must be a string";
+  } else {
+    var returnValues = queryClass(class);
+    var returnValue = "file link not found";
+    for (var i in returnValues) {
+      if (returnValues[i]["objectId"] == objectId) {
+        returnValue = returnValues[i][column]["url"];
+      }
+    }
+    return String(returnValue);
+  }
+}
+
+// Get pointed object from Id, class and column.  Only works if the column is a Parse pointer.
+function getParsePointedObject(objectId,class,column) {
+  if (typeof objectId != 'string') {
+    return "objectId must be a string";
+  } else if (typeof class != 'string') {
+    return "class must be a string";
+  } else if (typeof column != 'string') {
+    return "column must be a string";
+  } else {
+    var returnValues = queryClass(class);
+    var returnValue = "position not found";
+    for (var i in returnValues) {
+      if (returnValues[i]["objectId"] == objectId) {
+        returnValue = returnValues[i][column]["objectId"];
+      }
+    }
+    return String(returnValue);
+  }
+}
+
+// Get object ID from pointer.  No type checks.  Internal only.
+function getPointedObjectId(pointer) {
+  if (typeof object != 'object') {
+    return "pointer must be an object";
+  } else {
+    return object["objectId"];
+  }
+}
+
+// Get an object that is in a specific place in Parse's database for that class and extract a column value / object.
+function getParseColumnByPosition(positionInParse,class,column) {
+  if (typeof positionInParse != 'number') {
+    return "position in parse must be a number";
+  } else if (typeof class != 'string') {
+    return "class must be a string";
+  } else if (typeof column != 'string') {
+    return "column must be a string";
+  } else {
+    var returnValues = queryClass(class);
+    var returnValue = "position not found";
+    returnValue = returnValues[positionInParse][column];
+    return String(returnValue);
+  }
+}
+
+// Query an entire Parse class.  No type checks performed.
+function queryClass(class) {
+  var options =
+      {
+        "method" : "get",
+        "headers" : headers,
+      };
+  var URL = "https://api.parse.com/1/classes/" + class + "?limit%3D1000"
+  Utilities.sleep(sleepTime)
+  var response = UrlFetchApp.fetch(URL, options);
+  var returnValues = JSON.parse(response)["results"]; // This is now a JS array
+  return returnValues;
+}
+
+// Get Parse content for a column in an object 
+function getValue(class, objectId, column) {
+    var options =
+      {
+        "method" : "get",
+        "headers" : headers,
+      };
+  var URL = "https://api.parse.com/1/classes/" + class + "/" + objectId;
+  Utilities.sleep(sleepTime)
+  var response = UrlFetchApp.fetch(URL, options);
+  var returnObject = JSON.parse(response);
+  return returnObject[1][column];
+}
